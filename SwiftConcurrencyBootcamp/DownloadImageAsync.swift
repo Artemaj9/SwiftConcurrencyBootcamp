@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 class DownloadImageAsyncImageLoader {
     
@@ -30,24 +31,62 @@ class DownloadImageAsyncImageLoader {
         .resume()
         
     }
+    
+    func downloadWithCombine() -> AnyPublisher<UIImage?, Error> {
+        URLSession.shared.dataTaskPublisher(for: url)
+            .map(handleResponse)
+            .mapError({$0})
+            .eraseToAnyPublisher()
+    }
+    
+    
+    func downloadWithAsync() async throws -> UIImage?  {
+        do {
+            let (data,response) = try await  URLSession.shared.data(from: url, delegate: nil)
+            return handleResponse(data: data, response: response)
+        } catch {
+            throw error
+        }
+    }
 }
 
     class DownLoadImageAsyncViewModel: ObservableObject {
         
         @Published var image: UIImage? = nil
         let loader = DownloadImageAsyncImageLoader()
+        var cancellables = Set<AnyCancellable>()
         
-        func fetchImage() {
-            loader.downloadWithEscaping {[weak self] image, error in
-                DispatchQueue.main.async {
-                    self?.image = image
+        func fetchImage() async {
+//* Version 1
+//            loader.downloadWithEscaping {[weak self] image, error in
+//                DispatchQueue.main.async {
+//                    self?.image = image
+//                }
+//            } */
+            
+            
+         /* Verion 2
+          loader.downloadWithCombine()
+                .receive(on: DispatchQueue.main)
+                .sink { _ in
+                    
+                } receiveValue: { [weak self] image in
+                //    DispatchQueue.main.async {
+                        self?.image = image
+                  //  }
                 }
+                .store(in: &cancellables)  */
+            let image = try? await loader.downloadWithAsync()
+            
+            await  MainActor.run {
+                self.image = image
             }
         }
     }
 struct DownloadImageAsync: View {
     
     @StateObject private var viewModel = DownLoadImageAsyncViewModel()
+    
     var body: some View {
         VStack {
             if let image = viewModel.image {
@@ -59,7 +98,9 @@ struct DownloadImageAsync: View {
             }
         }
         .onAppear {
-            viewModel.fetchImage()
+            Task {
+               await viewModel.fetchImage()
+            }
 
                 }
             }
